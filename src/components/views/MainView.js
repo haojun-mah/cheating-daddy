@@ -549,7 +549,7 @@ export class MainView extends LitElement {
             this._token = creds.cloudToken || '';
             this._geminiKey = await cheatingDaddy.storage.getApiKey().catch(() => '') || '';
             this._groqKey = await cheatingDaddy.storage.getGroqApiKey().catch(() => '') || '';
-            this._openaiKey = creds.openaiKey || '';
+            this._openaiKey = await cheatingDaddy.storage.getOpenaiApiKey().catch(() => '') || '';
 
             // Load local AI settings
             this._ollamaHost = prefs.ollamaHost || 'http://127.0.0.1:11434';
@@ -718,10 +718,7 @@ export class MainView extends LitElement {
 
     async _saveOpenaiKey(val) {
         this._openaiKey = val;
-        try {
-            const creds = await cheatingDaddy.storage.getCredentials().catch(() => ({}));
-            await cheatingDaddy.storage.setCredentials({ ...creds, openaiKey: val });
-        } catch (e) {}
+        await cheatingDaddy.storage.setOpenaiApiKey(val);
         this.requestUpdate();
     }
 
@@ -753,7 +750,7 @@ export class MainView extends LitElement {
         if (this.isInitializing) return;
 
         if (this._mode === 'byok') {
-            if (!this._geminiKey.trim()) {
+            if (!this._openaiKey.trim() && !this._geminiKey.trim()) {
                 this._keyError = true;
                 this.requestUpdate();
                 return;
@@ -821,24 +818,40 @@ export class MainView extends LitElement {
     _renderByokMode() {
         return html`
             <div class="form-group">
-                <label class="form-label">Gemini API Key</label>
+                <label class="form-label">OpenAI API Key <span style="opacity:0.5;font-weight:400;text-transform:none">(recommended)</span></label>
                 <input
                     type="password"
-                    placeholder="Required"
-                    .value=${this._geminiKey}
-                    @input=${e => this._saveGeminiKey(e.target.value)}
-                    class=${this._keyError ? 'error' : ''}
+                    placeholder="Fast transcription + responses"
+                    .value=${this._openaiKey}
+                    @input=${e => this._saveOpenaiKey(e.target.value)}
+                    class=${this._keyError && !this._openaiKey.trim() ? 'error' : ''}
                 />
                 <div class="form-hint">
-                    <span class="link" @click=${() => this.onExternalLink('https://aistudio.google.com/apikey')}>Get Gemini key</span>
+                    GPT-4o-mini-transcribe + GPT-4o-mini · ~$0.06/session ·
+                    <span class="link" @click=${() => this.onExternalLink('https://platform.openai.com/api-keys')}>Get key</span>
                 </div>
             </div>
 
             <div class="form-group">
-                <label class="form-label">Groq API Key</label>
+                <label class="form-label">Gemini API Key <span style="opacity:0.5;font-weight:400;text-transform:none">(optional — for screenshots)</span></label>
                 <input
                     type="password"
                     placeholder="Optional"
+                    .value=${this._geminiKey}
+                    @input=${e => this._saveGeminiKey(e.target.value)}
+                    class=${this._keyError && !this._openaiKey.trim() && !this._geminiKey.trim() ? 'error' : ''}
+                />
+                <div class="form-hint">
+                    <span class="link" @click=${() => this.onExternalLink('https://aistudio.google.com/apikey')}>Get Gemini key</span>
+                    · needed for screenshot Q&A
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Groq API Key <span style="opacity:0.5;font-weight:400;text-transform:none">(optional)</span></label>
+                <input
+                    type="password"
+                    placeholder="Fallback when no OpenAI key"
                     .value=${this._groqKey}
                     @input=${e => this._saveGroqKey(e.target.value)}
                 />

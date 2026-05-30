@@ -56,6 +56,13 @@ const storage = {
     async setGroqApiKey(groqApiKey) {
         return ipcRenderer.invoke('storage:set-groq-api-key', groqApiKey);
     },
+    async getOpenaiApiKey() {
+        const result = await ipcRenderer.invoke('storage:get-openai-api-key');
+        return result.success ? result.data : '';
+    },
+    async setOpenaiApiKey(openaiApiKey) {
+        return ipcRenderer.invoke('storage:set-openai-api-key', openaiApiKey);
+    },
 
     // Preferences
     async getPreferences() {
@@ -142,14 +149,16 @@ function arrayBufferToBase64(buffer) {
 
 async function initializeGemini(profile = 'interview', language = 'en-US') {
     const apiKey = await storage.getApiKey();
-    if (apiKey) {
-        const prefs = await storage.getPreferences();
-        const success = await ipcRenderer.invoke('initialize-gemini', apiKey, prefs.customPrompt || '', profile, language);
-        if (success) {
-            cheatingDaddy.setStatus('Live');
-        } else {
-            cheatingDaddy.setStatus('error');
-        }
+    if (!apiKey) {
+        cheatingDaddy.setStatus('Ready (OpenAI mode)');
+        return;
+    }
+    const prefs = await storage.getPreferences();
+    const success = await ipcRenderer.invoke('initialize-gemini', apiKey, prefs.customPrompt || '', profile, language);
+    if (success) {
+        cheatingDaddy.setStatus('Live');
+    } else {
+        cheatingDaddy.setStatus('error');
     }
 }
 

@@ -137,6 +137,25 @@ function setupStorageIpcHandlers() {
         }
     });
 
+    ipcMain.handle('storage:get-openai-api-key', async () => {
+        try {
+            return { success: true, data: storage.getOpenaiApiKey() };
+        } catch (error) {
+            console.error('Error getting OpenAI API key:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('storage:set-openai-api-key', async (event, openaiApiKey) => {
+        try {
+            storage.setOpenaiApiKey(openaiApiKey);
+            return { success: true };
+        } catch (error) {
+            console.error('Error setting OpenAI API key:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
     // ============ PREFERENCES ============
     ipcMain.handle('storage:get-preferences', async () => {
         try {

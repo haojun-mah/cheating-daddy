@@ -1,9 +1,11 @@
 const { GoogleGenAI, Modality } = require('@google/genai');
 const { BrowserWindow, ipcMain } = require('electron');
 const { spawn } = require('child_process');
-const { saveDebugAudio } = require('../audioUtils');
+const { saveDebugAudio, pcmToWavBuffer } = require('../audioUtils');
 const { getSystemPrompt } = require('./prompts');
-const { getAvailableModel, incrementLimitCount, getApiKey, getGroqApiKey, incrementCharUsage, getModelForToday } = require('../storage');
+const { getAvailableModel, incrementLimitCount, getApiKey, getGroqApiKey, getOpenaiApiKey, incrementCharUsage, getModelForToday } = require('../storage');
+
+const WHISPER_MODEL = 'gpt-4o-mini-transcribe';
 const { connectCloud, sendCloudAudio, sendCloudText, sendCloudImage, closeCloud, isCloudActive, setOnTurnComplete } = require('./cloud');
 
 // Lazy-loaded to avoid circular dependency (localai.js imports from gemini.js)
@@ -200,10 +202,106 @@ async function getStoredSetting(key, defaultValue) {
     return defaultValue;
 }
 
-// helper to check if groq has been configured
 function hasGroqKey() {
     const key = getGroqApiKey();
-    return key && key.trim() != ''
+    return key && key.trim() !== '';
+}
+
+function hasOpenaiKey() {
+    const key = getOpenaiApiKey();
+    return key && key.trim() !== '';
+}
+
+// Whisper VAD state — energy-based silence detection for real-time transcription
+let whisperVadState = {
+    isSpeaking: false,
+    speechBuffers: [],
+    silenceFrameCount: 0,
+    speechFrameCount: 0,
+};
+const WHISPER_VAD = { energyThreshold: 0.008, speechFramesRequired: 3, silenceFramesRequired: 30 };
+
+function calculateRMS(pcmBuffer) {
+    const samples = pcmBuffer.length / 2;
+    if (samples === 0) return 0;
+    let sum = 0;
+    for (let i = 0; i < samples; i++) {
+        const s = pcmBuffer.readInt16LE(i * 2) / 32768;
+        sum += s * s;
+    }
+    return Math.sqrt(sum / samples);
+}
+
+function processWhisperVAD(pcmBuffer) {
+    const rms = calculateRMS(pcmBuffer);
+    const isVoice = rms > WHISPER_VAD.energyThreshold;
+
+    if (isVoice) {
+        whisperVadState.speechFrameCount++;
+        whisperVadState.silenceFrameCount = 0;
+        if (!whisperVadState.isSpeaking && whisperVadState.speechFrameCount >= WHISPER_VAD.speechFramesRequired) {
+            whisperVadState.isSpeaking = true;
+            whisperVadState.speechBuffers = [];
+        }
+    } else {
+        whisperVadState.silenceFrameCount++;
+        whisperVadState.speechFrameCount = 0;
+        if (whisperVadState.isSpeaking && whisperVadState.silenceFrameCount >= WHISPER_VAD.silenceFramesRequired) {
+            whisperVadState.isSpeaking = false;
+            const audioData = Buffer.concat(whisperVadState.speechBuffers);
+            whisperVadState.speechBuffers = [];
+            // ~0.5s minimum at 24kHz 16-bit mono = 24000 bytes
+            if (audioData.length >= 24000) {
+                transcribeAndRespond(audioData);
+            }
+            return;
+        }
+    }
+
+    if (whisperVadState.isSpeaking) {
+        whisperVadState.speechBuffers.push(Buffer.from(pcmBuffer));
+    }
+}
+
+async function transcribeAndRespond(pcmBuffer) {
+    const openaiApiKey = getOpenaiApiKey();
+    if (!openaiApiKey) return;
+
+    sendToRenderer('update-status', 'Transcribing...');
+
+    try {
+        const wavBuffer = pcmToWavBuffer(pcmBuffer, 24000, 1, 16);
+        const formData = new FormData();
+        const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+        formData.append('file', wavBlob, 'audio.wav');
+        formData.append('model', WHISPER_MODEL);
+        formData.append('language', sessionParams?.language?.split('-')[0] || 'en');
+
+        const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${openaiApiKey}` },
+            body: formData,
+        });
+
+        if (!response.ok) {
+            console.error('[Whisper] API error:', response.status, await response.text());
+            sendToRenderer('update-status', 'Listening...');
+            return;
+        }
+
+        const result = await response.json();
+        const transcript = result.text?.trim();
+
+        if (transcript && transcript.length > 2) {
+            console.log('[Whisper] Transcript:', transcript.substring(0, 80));
+            sendToOpenAI(transcript);
+        }
+
+        sendToRenderer('update-status', 'Listening...');
+    } catch (error) {
+        console.error('[Whisper] Transcription error:', error);
+        sendToRenderer('update-status', 'Listening...');
+    }
 }
 
 function trimConversationHistoryForGemma(history, maxChars=42000) {
@@ -224,6 +322,79 @@ function trimConversationHistoryForGemma(history, maxChars=42000) {
 
 function stripThinkingTags(text) {
     return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+}
+
+async function sendToOpenAI(transcription) {
+    const openaiApiKey = getOpenaiApiKey();
+    if (!openaiApiKey || !transcription?.trim()) return;
+
+    groqConversationHistory.push({ role: 'user', content: transcription.trim() });
+    if (groqConversationHistory.length > 20) {
+        groqConversationHistory = groqConversationHistory.slice(-20);
+    }
+
+    try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${openaiApiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                messages: [
+                    { role: 'system', content: currentSystemPrompt || 'You are a helpful assistant.' },
+                    ...groqConversationHistory,
+                ],
+                stream: true,
+                temperature: 0.7,
+                max_tokens: 1024,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('OpenAI API error:', response.status, errorText);
+            sendToRenderer('update-status', `OpenAI error: ${response.status}`);
+            return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        let isFirst = true;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            for (const line of chunk.split('\n')) {
+                if (!line.startsWith('data: ')) continue;
+                const data = line.slice(6);
+                if (data === '[DONE]') continue;
+                try {
+                    const json = JSON.parse(data);
+                    const token = json.choices?.[0]?.delta?.content || '';
+                    if (token) {
+                        fullText += token;
+                        sendToRenderer(isFirst ? 'new-response' : 'update-response', fullText);
+                        isFirst = false;
+                    }
+                } catch (_) {}
+            }
+        }
+
+        if (fullText.trim()) {
+            groqConversationHistory.push({ role: 'assistant', content: fullText.trim() });
+            saveConversationTurn(transcription, fullText);
+        }
+
+        console.log('OpenAI response completed');
+        sendToRenderer('update-status', 'Listening...');
+    } catch (error) {
+        console.error('Error calling OpenAI API:', error);
+        sendToRenderer('update-status', 'OpenAI error: ' + error.message);
+    }
 }
 
 async function sendToGroq(transcription) {
@@ -486,7 +657,9 @@ async function initializeGeminiSession(apiKey, customPrompt = '', profile = 'int
                     // if (message.serverContent?.outputTranscription?.text) { ... }
 
                     if (message.serverContent?.generationComplete) {
-                        if (currentTranscription.trim() !== '') {
+                        // When OpenAI key is present, Whisper VAD handles transcription+response
+                        // so skip the Gemini transcription dispatch to avoid double-firing
+                        if (!hasOpenaiKey() && currentTranscription.trim() !== '') {
                             if (hasGroqKey()) {
                                 sendToGroq(currentTranscription);
                             } else {
@@ -707,6 +880,9 @@ async function startMacOSAudioCapture(geminiSessionRef) {
             } else if (currentProviderMode === 'local') {
                 getLocalAi().processLocalAudio(monoChunk);
             } else {
+                if (hasOpenaiKey()) {
+                    processWhisperVAD(monoChunk);
+                }
                 const base64Data = monoChunk.toString('base64');
                 sendAudioToGemini(base64Data, geminiSessionRef);
             }
@@ -898,6 +1074,10 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         if (!geminiSessionRef.current) return { success: false, error: 'No active Gemini session' };
         try {
             process.stdout.write('.');
+            if (hasOpenaiKey()) {
+                const pcmBuffer = Buffer.from(data, 'base64');
+                processWhisperVAD(pcmBuffer);
+            }
             await geminiSessionRef.current.sendRealtimeInput({
                 audio: { data: data, mimeType: mimeType },
             });
@@ -1012,7 +1192,9 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         try {
             console.log('Sending text message:', text);
 
-            if (hasGroqKey()) {
+            if (hasOpenaiKey()) {
+                sendToOpenAI(text.trim());
+            } else if (hasGroqKey()) {
                 sendToGroq(text.trim());
             } else {
                 sendToGemma(text.trim());
@@ -1135,4 +1317,5 @@ module.exports = {
     sendImageToGeminiHttp,
     setupGeminiIpcHandlers,
     formatSpeakerResults,
+    sendToOpenAI,
 };
