@@ -4,14 +4,13 @@ if (require('electron-squirrel-startup')) {
 
 const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const { createWindow, updateGlobalShortcuts } = require('./utils/window');
-const { setupGeminiIpcHandlers, stopMacOSAudioCapture, sendToRenderer } = require('./utils/gemini');
+const { setupAiIpcHandlers, stopMacOSAudioCapture, sendToRenderer } = require('./utils/ai');
 const storage = require('./storage');
 
-const geminiSessionRef = { current: null };
 let mainWindow = null;
 
 function createMainWindow() {
-    mainWindow = createWindow(sendToRenderer, geminiSessionRef);
+    mainWindow = createWindow(sendToRenderer);
     return mainWindow;
 }
 
@@ -26,7 +25,7 @@ app.whenReady().then(async () => {
     }
 
     createMainWindow();
-    setupGeminiIpcHandlers(geminiSessionRef);
+    setupAiIpcHandlers();
     setupStorageIpcHandlers();
     setupGeneralIpcHandlers();
 });
@@ -95,44 +94,6 @@ function setupStorageIpcHandlers() {
             return { success: true };
         } catch (error) {
             console.error('Error setting credentials:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    ipcMain.handle('storage:get-api-key', async () => {
-        try {
-            return { success: true, data: storage.getApiKey() };
-        } catch (error) {
-            console.error('Error getting API key:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    ipcMain.handle('storage:set-api-key', async (event, apiKey) => {
-        try {
-            storage.setApiKey(apiKey);
-            return { success: true };
-        } catch (error) {
-            console.error('Error setting API key:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    ipcMain.handle('storage:get-groq-api-key', async () => {
-        try {
-            return { success: true, data: storage.getGroqApiKey() };
-        } catch (error) {
-            console.error('Error getting Groq API key:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    ipcMain.handle('storage:set-groq-api-key', async (event, groqApiKey) => {
-        try {
-            storage.setGroqApiKey(groqApiKey);
-            return { success: true };
-        } catch (error) {
-            console.error('Error setting Groq API key:', error);
             return { success: false, error: error.message };
         }
     });
@@ -307,7 +268,7 @@ function setupGeneralIpcHandlers() {
         if (mainWindow) {
             // Also save to storage
             storage.setKeybinds(newKeybinds);
-            updateGlobalShortcuts(newKeybinds, mainWindow, sendToRenderer, geminiSessionRef);
+            updateGlobalShortcuts(newKeybinds, mainWindow, sendToRenderer);
         }
     });
 

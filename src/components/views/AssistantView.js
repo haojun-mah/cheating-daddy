@@ -13,7 +13,214 @@ export class AssistantView extends LitElement {
             cursor: default;
         }
 
-        /* ── Response area ── */
+        /* ── Chat mode ── */
+
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--space-md);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-lg);
+            scroll-behavior: smooth;
+        }
+
+        .chat-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .chat-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .chat-container::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 3px;
+        }
+
+        .chat-container::-webkit-scrollbar-thumb:hover {
+            background: #444444;
+        }
+
+        .turn {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+        }
+
+        .bubble-label {
+            font-size: var(--font-size-xs);
+            font-weight: var(--font-weight-semibold);
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 0 var(--space-xs);
+        }
+
+        .bubble {
+            padding: var(--space-sm) var(--space-md);
+            border-radius: var(--radius-md);
+            line-height: var(--line-height);
+            font-size: var(--font-size-base);
+            word-break: break-word;
+        }
+
+        .bubble.interviewer {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+
+        .bubble.answer {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-strong);
+            color: var(--text-primary);
+            user-select: text;
+            cursor: text;
+        }
+
+        .bubble.answer * {
+            user-select: text;
+            cursor: text;
+        }
+
+        .bubble.answer a {
+            cursor: pointer;
+        }
+
+        .bubble.answer.is-answering::after {
+            content: '';
+            display: inline-block;
+            width: 2px;
+            height: 1em;
+            background: var(--accent);
+            margin-left: 2px;
+            vertical-align: text-bottom;
+            animation: cursor-blink 1s step-end infinite;
+        }
+
+        @keyframes cursor-blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .chat-empty {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            font-size: var(--font-size-sm);
+        }
+
+        /* ── Markdown styles for answer bubbles ── */
+
+        .bubble.answer h1,
+        .bubble.answer h2,
+        .bubble.answer h3,
+        .bubble.answer h4,
+        .bubble.answer h5,
+        .bubble.answer h6 {
+            margin: 1em 0 0.5em 0;
+            color: var(--text-primary);
+            font-weight: var(--font-weight-semibold);
+        }
+
+        .bubble.answer h1 { font-size: 1.5em; }
+        .bubble.answer h2 { font-size: 1.3em; }
+        .bubble.answer h3 { font-size: 1.15em; }
+        .bubble.answer h4 { font-size: 1.05em; }
+        .bubble.answer h5,
+        .bubble.answer h6 { font-size: 1em; }
+
+        .bubble.answer p {
+            margin: 0.6em 0;
+        }
+
+        .bubble.answer p:first-child {
+            margin-top: 0;
+        }
+
+        .bubble.answer p:last-child {
+            margin-bottom: 0;
+        }
+
+        .bubble.answer ul,
+        .bubble.answer ol {
+            margin: 0.6em 0;
+            padding-left: 1.5em;
+        }
+
+        .bubble.answer li {
+            margin: 0.3em 0;
+        }
+
+        .bubble.answer blockquote {
+            margin: 0.8em 0;
+            padding: 0.5em 1em;
+            border-left: 2px solid var(--border-strong);
+            background: var(--bg-surface);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+        }
+
+        .bubble.answer code {
+            background: var(--bg-elevated);
+            padding: 0.15em 0.4em;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.85em;
+        }
+
+        .bubble.answer pre {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: var(--space-md);
+            overflow-x: auto;
+            margin: 0.8em 0;
+        }
+
+        .bubble.answer pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .bubble.answer a {
+            color: var(--accent);
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+
+        .bubble.answer strong,
+        .bubble.answer b {
+            font-weight: var(--font-weight-semibold);
+        }
+
+        .bubble.answer hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 1.5em 0;
+        }
+
+        .bubble.answer table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 0.8em 0;
+        }
+
+        .bubble.answer th,
+        .bubble.answer td {
+            border: 1px solid var(--border);
+            padding: var(--space-sm);
+            text-align: left;
+        }
+
+        .bubble.answer th {
+            background: var(--bg-surface);
+            font-weight: var(--font-weight-semibold);
+        }
+
+        /* ── Legacy single-response area (fallback for local/cloud) ── */
 
         .response-container {
             flex: 1;
@@ -40,8 +247,6 @@ export class AssistantView extends LitElement {
         .response-container [data-word] {
             display: inline-block;
         }
-
-        /* ── Markdown ── */
 
         .response-container h1,
         .response-container h2,
@@ -301,6 +506,7 @@ export class AssistantView extends LitElement {
     `;
 
     static properties = {
+        chatTurns: { type: Array },
         responses: { type: Array },
         currentResponseIndex: { type: Number },
         selectedProfile: { type: String },
@@ -311,6 +517,7 @@ export class AssistantView extends LitElement {
 
     constructor() {
         super();
+        this.chatTurns = [];
         this.responses = [];
         this.currentResponseIndex = -1;
         this.selectedProfile = 'interview';
@@ -345,6 +552,19 @@ export class AssistantView extends LitElement {
                     gfm: true,
                     sanitize: false,
                 });
+                return window.marked.parse(content);
+            } catch (error) {
+                console.warn('Error parsing markdown:', error);
+                return content;
+            }
+        }
+        return content;
+    }
+
+    renderMarkdownWithWordSpans(content) {
+        if (typeof window !== 'undefined' && window.marked) {
+            try {
+                window.marked.setOptions({ breaks: true, gfm: true, sanitize: false });
                 let rendered = window.marked.parse(content);
                 rendered = this.wrapWordsInSpans(rendered);
                 return rendered;
@@ -424,6 +644,15 @@ export class AssistantView extends LitElement {
         }
     }
 
+    _scrollChatToBottom() {
+        requestAnimationFrame(() => {
+            const container = this.shadowRoot.querySelector('#chatContainer');
+            if (container) {
+                container.scrollTop = container.scrollHeight;
+            }
+        });
+    }
+
     connectedCallback() {
         super.connectedCallback();
 
@@ -493,27 +722,23 @@ export class AssistantView extends LitElement {
 
         const dangerColor = getComputedStyle(this).getPropertyValue('--danger').trim() || '#EF4444';
         const startTime = performance.now();
-        const FADE_IN = 0.5; // seconds
-        const PARTICLE_SPREAD = 4; // px inward from border
+        const FADE_IN = 0.5;
+        const PARTICLE_SPREAD = 4;
         const PARTICLE_COUNT = 250;
 
-        // Pill perimeter helpers
         const w = rect.width;
         const h = rect.height;
-        const r = h / 2; // pill radius = half height
+        const r = h / 2;
         const straightLen = w - 2 * r;
         const arcLen = Math.PI * r;
         const perimeter = 2 * straightLen + 2 * arcLen;
 
-        // Given a distance along the perimeter, return {x, y, nx, ny} (position + inward normal)
         const pointOnPerimeter = (d) => {
             d = ((d % perimeter) + perimeter) % perimeter;
-            // Top straight: left to right
             if (d < straightLen) {
                 return { x: r + d, y: 0, nx: 0, ny: 1 };
             }
             d -= straightLen;
-            // Right arc
             if (d < arcLen) {
                 const angle = -Math.PI / 2 + (d / arcLen) * Math.PI;
                 return {
@@ -524,12 +749,10 @@ export class AssistantView extends LitElement {
                 };
             }
             d -= arcLen;
-            // Bottom straight: right to left
             if (d < straightLen) {
                 return { x: w - r - d, y: h, nx: 0, ny: -1 };
             }
             d -= straightLen;
-            // Left arc
             const angle = Math.PI / 2 + (d / arcLen) * Math.PI;
             return {
                 x: r + Math.cos(angle) * r,
@@ -539,7 +762,6 @@ export class AssistantView extends LitElement {
             };
         };
 
-        // Pre-seed random offsets for stable particles
         const seeds = [];
         for (let i = 0; i < PARTICLE_COUNT; i++) {
             seeds.push({ pos: Math.random(), drift: Math.random(), depthSeed: Math.random() });
@@ -551,7 +773,6 @@ export class AssistantView extends LitElement {
 
             ctx.clearRect(0, 0, w, h);
 
-            // ── Particle border ──
             ctx.fillStyle = dangerColor;
             for (let i = 0; i < PARTICLE_COUNT; i++) {
                 const s = seeds[i];
@@ -572,7 +793,6 @@ export class AssistantView extends LitElement {
                 ctx.fill();
             }
 
-            // ── Waveform ──
             const midY = h / 2;
             const waves = [
                 { freq: 3, amp: 0.35, speed: 2.5, opacity: 0.9, width: 1.8 },
@@ -633,6 +853,11 @@ export class AssistantView extends LitElement {
 
     updated(changedProperties) {
         super.updated(changedProperties);
+
+        if (changedProperties.has('chatTurns')) {
+            this._scrollChatToBottom();
+        }
+
         if (changedProperties.has('responses') || changedProperties.has('currentResponseIndex')) {
             this.updateResponseContent();
         }
@@ -656,7 +881,7 @@ export class AssistantView extends LitElement {
         const container = this.shadowRoot.querySelector('#responseContainer');
         if (container) {
             const currentResponse = this.getCurrentResponse();
-            const renderedResponse = this.renderMarkdown(currentResponse);
+            const renderedResponse = this.renderMarkdownWithWordSpans(currentResponse);
             container.innerHTML = renderedResponse;
             if (this.shouldAnimateResponse) {
                 this.dispatchEvent(new CustomEvent('response-animation-complete', { bubbles: true, composed: true }));
@@ -664,7 +889,55 @@ export class AssistantView extends LitElement {
         }
     }
 
-    render() {
+    _renderInputBar() {
+        return html`
+            <div class="input-bar">
+                <div class="input-bar-inner">
+                    <input
+                        type="text"
+                        id="textInput"
+                        placeholder="Type a message..."
+                        @keydown=${this.handleTextKeydown}
+                    />
+                </div>
+                <button class="analyze-btn ${this.isAnalyzing ? 'analyzing' : ''}" @click=${this.handleScreenAnswer}>
+                    <canvas class="analyze-canvas"></canvas>
+                    <span class="analyze-btn-content">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24">
+                            <path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 3v7h6l-8 11v-7H5z" />
+                        </svg>
+                        Analyze Screen
+                    </span>
+                </button>
+            </div>
+        `;
+    }
+
+    _renderChatMode() {
+        return html`
+            <div class="chat-container" id="chatContainer">
+                ${this.chatTurns.length === 0 ? html`
+                    <div class="chat-empty">Listening...</div>
+                ` : this.chatTurns.map(turn => html`
+                    <div class="turn">
+                        <div class="bubble-label">Interviewer</div>
+                        <div class="bubble interviewer">${turn.transcription}</div>
+                        ${turn.answer || turn.isAnswering ? html`
+                            <div class="bubble-label">AI Answer</div>
+                            <div
+                                class="bubble answer ${turn.isAnswering ? 'is-answering' : ''}"
+                                data-turn-index="${turn.turnIndex}"
+                                .innerHTML=${this.renderMarkdown(turn.answer || '')}
+                            ></div>
+                        ` : ''}
+                    </div>
+                `)}
+            </div>
+            ${this._renderInputBar()}
+        `;
+    }
+
+    _renderSingleResponseMode() {
         const hasMultipleResponses = this.responses.length > 1;
 
         return html`
@@ -686,26 +959,18 @@ export class AssistantView extends LitElement {
                 </div>
             ` : ''}
 
-            <div class="input-bar">
-                <div class="input-bar-inner">
-                    <input
-                        type="text"
-                        id="textInput"
-                        placeholder="Type a message..."
-                        @keydown=${this.handleTextKeydown}
-                    />
-                </div>
-                <button class="analyze-btn ${this.isAnalyzing ? 'analyzing' : ''}" @click=${this.handleScreenAnswer}>
-                    <canvas class="analyze-canvas"></canvas>
-                    <span class="analyze-btn-content">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24">
-                            <path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 3v7h6l-8 11v-7H5z" />
-                        </svg>
-                        Analyze Screen
-                    </span>
-                </button>
-            </div>
+            ${this._renderInputBar()}
         `;
+    }
+
+    render() {
+        const useChatMode = this.chatTurns && this.chatTurns.length > 0;
+
+        if (useChatMode) {
+            return this._renderChatMode();
+        }
+
+        return this._renderSingleResponseMode();
     }
 }
 

@@ -31,6 +31,9 @@ let currentCustomPrompt = null;
 let isInitializingSession = false;
 let currentSystemPrompt = null;
 
+// Turn index for chat-style transcription display
+let currentTurnIndex = 0;
+
 function formatSpeakerResults(results) {
     let text = '';
     for (const result of results) {
@@ -86,6 +89,7 @@ function initializeNewSession(profile = null, customPrompt = null) {
     groqConversationHistory = [];
     currentProfile = profile;
     currentCustomPrompt = customPrompt;
+    currentTurnIndex = 0;
     console.log('New conversation session started:', currentSessionId, 'profile:', profile);
 
     // Save initial session with profile context
@@ -294,7 +298,9 @@ async function transcribeAndRespond(pcmBuffer) {
 
         if (transcript && transcript.length > 2) {
             console.log('[Whisper] Transcript:', transcript.substring(0, 80));
-            sendToOpenAI(transcript);
+            const turnIndex = currentTurnIndex++;
+            sendToRenderer('new-turn-transcription', { turnIndex, text: transcript });
+            sendToOpenAI(transcript, turnIndex);
         }
 
         sendToRenderer('update-status', 'Listening...');
@@ -324,7 +330,7 @@ function stripThinkingTags(text) {
     return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 }
 
-async function sendToOpenAI(transcription) {
+async function sendToOpenAI(transcription, turnIndex) {
     const openaiApiKey = getOpenaiApiKey();
     if (!openaiApiKey || !transcription?.trim()) return;
 
@@ -362,7 +368,6 @@ async function sendToOpenAI(transcription) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let fullText = '';
-        let isFirst = true;
 
         while (true) {
             const { done, value } = await reader.read();
@@ -377,8 +382,7 @@ async function sendToOpenAI(transcription) {
                     const token = json.choices?.[0]?.delta?.content || '';
                     if (token) {
                         fullText += token;
-                        sendToRenderer(isFirst ? 'new-response' : 'update-response', fullText);
-                        isFirst = false;
+                        sendToRenderer('update-turn-answer', { turnIndex, text: fullText });
                     }
                 } catch (_) {}
             }
@@ -657,16 +661,9 @@ async function initializeGeminiSession(apiKey, customPrompt = '', profile = 'int
                     // if (message.serverContent?.outputTranscription?.text) { ... }
 
                     if (message.serverContent?.generationComplete) {
-                        // When OpenAI key is present, Whisper VAD handles transcription+response
-                        // so skip the Gemini transcription dispatch to avoid double-firing
-                        if (!hasOpenaiKey() && currentTranscription.trim() !== '') {
-                            if (hasGroqKey()) {
-                                sendToGroq(currentTranscription);
-                            } else {
-                                sendToGemma(currentTranscription);
-                            }
-                            currentTranscription = '';
-                        }
+                        // Whisper VAD handles transcription+response via OpenAI
+                        // Gemini live session is used only for audio context
+                        currentTranscription = '';
                         messageBuffer = '';
                     }
 
@@ -1071,16 +1068,17 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
                 return { success: false, error: error.message };
             }
         }
-        if (!geminiSessionRef.current) return { success: false, error: 'No active Gemini session' };
         try {
             process.stdout.write('.');
             if (hasOpenaiKey()) {
                 const pcmBuffer = Buffer.from(data, 'base64');
                 processWhisperVAD(pcmBuffer);
             }
-            await geminiSessionRef.current.sendRealtimeInput({
-                audio: { data: data, mimeType: mimeType },
-            });
+            if (geminiSessionRef.current) {
+                await geminiSessionRef.current.sendRealtimeInput({
+                    audio: { data: data, mimeType: mimeType },
+                });
+            }
             return { success: true };
         } catch (error) {
             console.error('Error sending system audio:', error);
@@ -1187,20 +1185,19 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
             }
         }
 
-        if (!geminiSessionRef.current) return { success: false, error: 'No active Gemini session' };
-
         try {
             console.log('Sending text message:', text);
 
             if (hasOpenaiKey()) {
-                sendToOpenAI(text.trim());
-            } else if (hasGroqKey()) {
-                sendToGroq(text.trim());
-            } else {
-                sendToGemma(text.trim());
+                const turnIndex = currentTurnIndex++;
+                sendToRenderer('new-turn-transcription', { turnIndex, text: text.trim() });
+                sendToOpenAI(text.trim(), turnIndex);
             }
 
-            await geminiSessionRef.current.sendRealtimeInput({ text: text.trim() });
+            if (geminiSessionRef.current) {
+                await geminiSessionRef.current.sendRealtimeInput({ text: text.trim() });
+            }
+
             return { success: true };
         } catch (error) {
             console.error('Error sending text:', error);

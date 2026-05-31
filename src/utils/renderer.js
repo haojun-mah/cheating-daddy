@@ -42,20 +42,6 @@ const storage = {
     async setCredentials(credentials) {
         return ipcRenderer.invoke('storage:set-credentials', credentials);
     },
-    async getApiKey() {
-        const result = await ipcRenderer.invoke('storage:get-api-key');
-        return result.success ? result.data : '';
-    },
-    async setApiKey(apiKey) {
-        return ipcRenderer.invoke('storage:set-api-key', apiKey);
-    },
-    async getGroqApiKey() {
-        const result = await ipcRenderer.invoke('storage:get-groq-api-key');
-        return result.success ? result.data : '';
-    },
-    async setGroqApiKey(groqApiKey) {
-        return ipcRenderer.invoke('storage:set-groq-api-key', groqApiKey);
-    },
     async getOpenaiApiKey() {
         const result = await ipcRenderer.invoke('storage:get-openai-api-key');
         return result.success ? result.data : '';
@@ -147,16 +133,11 @@ function arrayBufferToBase64(buffer) {
     return btoa(binary);
 }
 
-async function initializeGemini(profile = 'interview', language = 'en-US') {
-    const apiKey = await storage.getApiKey();
-    if (!apiKey) {
-        cheatingDaddy.setStatus('Ready (OpenAI mode)');
-        return;
-    }
+async function initializeSession(profile = 'interview', language = 'en-US') {
     const prefs = await storage.getPreferences();
-    const success = await ipcRenderer.invoke('initialize-gemini', apiKey, prefs.customPrompt || '', profile, language);
+    const success = await ipcRenderer.invoke('initialize-session', prefs.customPrompt || '', profile, language);
     if (success) {
-        cheatingDaddy.setStatus('Live');
+        cheatingDaddy.setStatus('Listening...');
     } else {
         cheatingDaddy.setStatus('error');
     }
@@ -212,6 +193,8 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
     await loadPreferencesCache();
     const audioMode = preferencesCache.audioMode || 'speaker_only';
 
+    console.log('[Audio] startCapture called — platform:', process.platform, 'audioMode:', audioMode);
+
     try {
         if (isMacOS) {
             // On macOS, use SystemAudioDump for audio and getDisplayMedia for screen
@@ -256,6 +239,7 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
             }
         } else if (isLinux) {
             // Linux - use display media for screen capture and try to get system audio
+            console.log('[Audio] Linux path — attempting getDisplayMedia with audio');
             try {
                 // First try to get system audio via getDisplayMedia (works on newer browsers)
                 mediaStream = await navigator.mediaDevices.getDisplayMedia({
@@ -273,12 +257,18 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
                     },
                 });
 
-                console.log('Linux system audio capture via getDisplayMedia succeeded');
+                const hasSystemAudio = mediaStream.getAudioTracks().length > 0;
+                console.log('Linux system audio capture via getDisplayMedia - has audio:', hasSystemAudio);
 
-                // Setup audio processing for Linux system audio
-                setupLinuxSystemAudioProcessing();
+                if (hasSystemAudio) {
+                    // Setup audio processing for Linux system audio
+                    setupLinuxSystemAudioProcessing();
+                } else {
+                    console.warn('getDisplayMedia returned no audio tracks, will fall back to mic');
+                }
             } catch (systemAudioError) {
-                console.warn('System audio via getDisplayMedia failed, trying screen-only capture:', systemAudioError);
+                console.warn('[Audio] getDisplayMedia with audio failed:', systemAudioError.name, systemAudioError.message);
+                console.log('[Audio] Falling back to screen-only getDisplayMedia');
 
                 // Fallback to screen-only capture
                 mediaStream = await navigator.mediaDevices.getDisplayMedia({
@@ -289,11 +279,16 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
                     },
                     audio: false,
                 });
+                console.log('[Audio] Screen-only getDisplayMedia succeeded');
             }
 
-            // Additionally get microphone input for Linux based on audio mode
-            if (audioMode === 'mic_only' || audioMode === 'both') {
+            // Use mic if system audio is unavailable, or if mode requires it
+            const systemAudioAvailable = mediaStream.getAudioTracks().length > 0;
+            console.log('[Audio] System audio available:', systemAudioAvailable, '— will use mic:', !systemAudioAvailable || audioMode === 'mic_only' || audioMode === 'both');
+
+            if (audioMode === 'mic_only' || audioMode === 'both' || !systemAudioAvailable) {
                 let micStream = null;
+                console.log('[Audio] Requesting getUserMedia for microphone...');
                 try {
                     micStream = await navigator.mediaDevices.getUserMedia({
                         audio: {
@@ -306,19 +301,20 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
                         video: false,
                     });
 
-                    console.log('Linux microphone capture started');
-
-                    // Setup audio processing for microphone on Linux
+                    const tracks = micStream.getAudioTracks();
+                    console.log('[Audio] getUserMedia succeeded — tracks:', tracks.length, tracks[0]?.label);
                     setupLinuxMicProcessing(micStream);
                 } catch (micError) {
-                    console.warn('Failed to get microphone access on Linux:', micError);
-                    // Continue without microphone if permission denied
+                    console.error('[Audio] getUserMedia FAILED — name:', micError.name, 'message:', micError.message);
+                    console.error('[Audio] No audio source available — transcription will not work');
+                    sendToRenderer('update-status', 'error');
                 }
             }
 
-            console.log('Linux capture started - system audio:', mediaStream.getAudioTracks().length > 0, 'microphone mode:', audioMode);
+            console.log('[Audio] Linux capture complete — system audio:', systemAudioAvailable, 'audioMode:', audioMode);
         } else {
             // Windows - use display media with loopback for system audio
+            console.log('[Audio] Windows path — attempting getDisplayMedia with loopback audio');
             mediaStream = await navigator.mediaDevices.getDisplayMedia({
                 video: {
                     frameRate: 1,
@@ -334,7 +330,11 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
                 },
             });
 
-            console.log('Windows capture started with loopback audio');
+            const winAudioTracks = mediaStream.getAudioTracks().length;
+            console.log('[Audio] Windows getDisplayMedia — audio tracks:', winAudioTracks, '— video tracks:', mediaStream.getVideoTracks().length);
+            if (winAudioTracks === 0) {
+                console.error('[Audio] Windows loopback audio got 0 tracks — user may have denied sharing audio or loopback not supported');
+            }
 
             // Setup audio processing for Windows loopback audio only
             setupWindowsLoopbackProcessing();
@@ -382,10 +382,18 @@ function setupLinuxMicProcessing(micStream) {
 
     let audioBuffer = [];
     const samplesPerChunk = SAMPLE_RATE * AUDIO_CHUNK_DURATION;
+    let chunkCount = 0;
+
+    console.log('[Audio] setupLinuxMicProcessing — AudioContext state:', micAudioContext.state, 'sampleRate:', micAudioContext.sampleRate);
 
     micProcessor.onaudioprocess = async e => {
         const inputData = e.inputBuffer.getChannelData(0);
         audioBuffer.push(...inputData);
+
+        if (chunkCount === 0) {
+            console.log('[Audio] First onaudioprocess fired — mic is delivering audio');
+        }
+        chunkCount++;
 
         // Process audio in chunks
         while (audioBuffer.length >= samplesPerChunk) {
@@ -445,10 +453,18 @@ function setupWindowsLoopbackProcessing() {
 
     let audioBuffer = [];
     const samplesPerChunk = SAMPLE_RATE * AUDIO_CHUNK_DURATION;
+    let chunkCount = 0;
+
+    console.log('[Audio] setupWindowsLoopbackProcessing — AudioContext state:', audioContext.state, 'sampleRate:', audioContext.sampleRate);
 
     audioProcessor.onaudioprocess = async e => {
         const inputData = e.inputBuffer.getChannelData(0);
         audioBuffer.push(...inputData);
+
+        if (chunkCount === 0) {
+            console.log('[Audio] First Windows loopback onaudioprocess fired — audio is flowing');
+        }
+        chunkCount++;
 
         // Process audio in chunks
         while (audioBuffer.length >= samplesPerChunk) {
@@ -1035,7 +1051,7 @@ const cheatingDaddy = {
     updateCurrentResponse: response => cheatingDaddyApp.updateCurrentResponse(response),
 
     // Core functionality
-    initializeGemini,
+    initializeSession,
     initializeCloud,
     initializeLocal,
     startCapture,

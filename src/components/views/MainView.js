@@ -489,8 +489,6 @@ export class MainView extends LitElement {
         // Internal state
         _mode: { state: true },
         _token: { state: true },
-        _geminiKey: { state: true },
-        _groqKey: { state: true },
         _openaiKey: { state: true },
         _tokenError: { state: true },
         _keyError: { state: true },
@@ -512,8 +510,6 @@ export class MainView extends LitElement {
 
         this._mode = 'byok';
         this._token = '';
-        this._geminiKey = '';
-        this._groqKey = '';
         this._openaiKey = '';
         this._tokenError = false;
         this._keyError = false;
@@ -547,8 +543,6 @@ export class MainView extends LitElement {
 
             // Load keys
             this._token = creds.cloudToken || '';
-            this._geminiKey = await cheatingDaddy.storage.getApiKey().catch(() => '') || '';
-            this._groqKey = await cheatingDaddy.storage.getGroqApiKey().catch(() => '') || '';
             this._openaiKey = await cheatingDaddy.storage.getOpenaiApiKey().catch(() => '') || '';
 
             // Load local AI settings
@@ -703,21 +697,9 @@ export class MainView extends LitElement {
         this.requestUpdate();
     }
 
-    async _saveGeminiKey(val) {
-        this._geminiKey = val;
-        this._keyError = false;
-        await cheatingDaddy.storage.setApiKey(val);
-        this.requestUpdate();
-    }
-
-    async _saveGroqKey(val) {
-        this._groqKey = val;
-        await cheatingDaddy.storage.setGroqApiKey(val);
-        this.requestUpdate();
-    }
-
     async _saveOpenaiKey(val) {
         this._openaiKey = val;
+        this._keyError = false;
         await cheatingDaddy.storage.setOpenaiApiKey(val);
         this.requestUpdate();
     }
@@ -750,7 +732,7 @@ export class MainView extends LitElement {
         if (this.isInitializing) return;
 
         if (this._mode === 'byok') {
-            if (!this._openaiKey.trim() && !this._geminiKey.trim()) {
+            if (!this._openaiKey.trim()) {
                 this._keyError = true;
                 this.requestUpdate();
                 return;
@@ -829,34 +811,6 @@ export class MainView extends LitElement {
                 <div class="form-hint">
                     GPT-4o-mini-transcribe + GPT-4o-mini · ~$0.06/session ·
                     <span class="link" @click=${() => this.onExternalLink('https://platform.openai.com/api-keys')}>Get key</span>
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label">Gemini API Key <span style="opacity:0.5;font-weight:400;text-transform:none">(optional — for screenshots)</span></label>
-                <input
-                    type="password"
-                    placeholder="Optional"
-                    .value=${this._geminiKey}
-                    @input=${e => this._saveGeminiKey(e.target.value)}
-                    class=${this._keyError && !this._openaiKey.trim() && !this._geminiKey.trim() ? 'error' : ''}
-                />
-                <div class="form-hint">
-                    <span class="link" @click=${() => this.onExternalLink('https://aistudio.google.com/apikey')}>Get Gemini key</span>
-                    · needed for screenshot Q&A
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label">Groq API Key <span style="opacity:0.5;font-weight:400;text-transform:none">(optional)</span></label>
-                <input
-                    type="password"
-                    placeholder="Fallback when no OpenAI key"
-                    .value=${this._groqKey}
-                    @input=${e => this._saveGroqKey(e.target.value)}
-                />
-                <div class="form-hint">
-                    <span class="link" @click=${() => this.onExternalLink('https://console.groq.com/keys')}>Get Groq key</span>
                 </div>
             </div>
 

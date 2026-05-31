@@ -363,6 +363,7 @@ export class CheatingDaddyApp extends LitElement {
         _storageLoaded: { state: true },
         _updateAvailable: { state: true },
         _whisperDownloading: { state: true },
+        chatTurns: { type: Array },
     };
 
     constructor() {
@@ -389,6 +390,7 @@ export class CheatingDaddyApp extends LitElement {
         this._updateAvailable = false;
         this._whisperDownloading = false;
         this._localVersion = '';
+        this.chatTurns = [];
 
         this._loadFromStorage();
         this._checkForUpdates();
@@ -451,6 +453,8 @@ export class CheatingDaddyApp extends LitElement {
             ipcRenderer.on('click-through-toggled', (_, isEnabled) => { this._isClickThrough = isEnabled; });
             ipcRenderer.on('reconnect-failed', (_, data) => this.addNewResponse(data.message));
             ipcRenderer.on('whisper-downloading', (_, downloading) => { this._whisperDownloading = downloading; });
+            ipcRenderer.on('new-turn-transcription', (_, data) => this.handleNewTurn(data));
+            ipcRenderer.on('update-turn-answer', (_, data) => this.handleUpdateTurnAnswer(data));
         }
     }
 
@@ -465,6 +469,8 @@ export class CheatingDaddyApp extends LitElement {
             ipcRenderer.removeAllListeners('click-through-toggled');
             ipcRenderer.removeAllListeners('reconnect-failed');
             ipcRenderer.removeAllListeners('whisper-downloading');
+            ipcRenderer.removeAllListeners('new-turn-transcription');
+            ipcRenderer.removeAllListeners('update-turn-answer');
         }
     }
 
@@ -501,6 +507,9 @@ export class CheatingDaddyApp extends LitElement {
         this.statusText = text;
         if (text.includes('Ready') || text.includes('Listening') || text.includes('Error')) {
             this._currentResponseIsComplete = true;
+            if (this.chatTurns && this.chatTurns.some(t => t.isAnswering)) {
+                this.chatTurns = this.chatTurns.map(t => ({ ...t, isAnswering: false }));
+            }
         }
     }
 
@@ -520,6 +529,25 @@ export class CheatingDaddyApp extends LitElement {
         } else {
             this.addNewResponse(response);
         }
+        this.requestUpdate();
+    }
+
+    handleNewTurn({ turnIndex, text }) {
+        this.chatTurns = [...this.chatTurns, {
+            turnIndex,
+            transcription: text,
+            answer: '',
+            isAnswering: true,
+        }];
+        this.requestUpdate();
+    }
+
+    handleUpdateTurnAnswer({ turnIndex, text, isAnswering }) {
+        this.chatTurns = this.chatTurns.map(turn =>
+            turn.turnIndex === turnIndex
+                ? { ...turn, answer: text, isAnswering: isAnswering !== false }
+                : turn
+        );
         this.requestUpdate();
     }
 
@@ -596,8 +624,8 @@ export class CheatingDaddyApp extends LitElement {
                 return;
             }
         } else {
-            const apiKey = await cheatingDaddy.storage.getApiKey();
-            if (!apiKey || apiKey === '') {
+            const openaiKey = await cheatingDaddy.storage.getOpenaiApiKey().catch(() => '');
+            if (!openaiKey || openaiKey === '') {
                 const mainView = this.shadowRoot.querySelector('main-view');
                 if (mainView && mainView.triggerApiKeyError) {
                     mainView.triggerApiKeyError();
@@ -605,12 +633,13 @@ export class CheatingDaddyApp extends LitElement {
                 return;
             }
 
-            await cheatingDaddy.initializeGemini(this.selectedProfile, this.selectedLanguage);
+            await cheatingDaddy.initializeSession(this.selectedProfile, this.selectedLanguage);
         }
 
         cheatingDaddy.startCapture(this.selectedScreenshotInterval, this.selectedImageQuality);
         this.responses = [];
         this.currentResponseIndex = -1;
+        this.chatTurns = [];
         this.startTime = Date.now();
         this.sessionActive = true;
         this.currentView = 'assistant';
@@ -621,13 +650,6 @@ export class CheatingDaddyApp extends LitElement {
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
             await ipcRenderer.invoke('open-external', 'https://cheatingdaddy.com/help/api-key');
-        }
-    }
-
-    async handleGroqAPIKeyHelp() {
-        if (window.require) {
-            const { ipcRenderer } = window.require('electron');
-            await ipcRenderer.invoke('open-external', 'https://console.groq.com/keys');
         }
     }
 
@@ -760,6 +782,7 @@ export class CheatingDaddyApp extends LitElement {
             case 'assistant':
                 return html`
                     <assistant-view
+                        .chatTurns=${this.chatTurns}
                         .responses=${this.responses}
                         .currentResponseIndex=${this.currentResponseIndex}
                         .selectedProfile=${this.selectedProfile}
